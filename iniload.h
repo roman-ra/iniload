@@ -197,7 +197,10 @@ ini_section *__ini_add_section(ini_file *ini, const char *section_name) {
 }
 
 int __ini_add_key(ini_section *section, const char *key_name, ini_key_type type,
-                  void *value) {
+                  void *value, int is_string) {
+  float float_val;
+  int int_val;
+
   if (section->num_keys == section->cap_keys) {
     ini_key *new_ptr = (ini_key *)realloc(
         section->ptr_keys, sizeof(ini_key) * (section->cap_keys * 2));
@@ -208,31 +211,27 @@ int __ini_add_key(ini_section *section, const char *key_name, ini_key_type type,
     section->cap_keys = section->cap_keys * 2;
   }
   strcpy(section->ptr_keys[section->num_keys].name, key_name);
-  section->ptr_keys[section->num_keys].type = type;
-  switch (type) {
-  case INI_KEY_INT:
-    memcpy((void *)&section->ptr_keys[section->num_keys].value, value,
-           sizeof(int));
+
+  /* Guess the data type */
+  if (sscanf((char *)value, "%d", &int_val) == 1 && !is_string &&
+      strchr((char *)value, '.') == NULL) {
+    /* We need to check if there is a dot to avoid parsing only the integer part
+     * of a possible float  */
     section->ptr_keys[section->num_keys].type = INI_KEY_INT;
-    break;
-  case INI_KEY_FLOAT:
-    memcpy((void *)&section->ptr_keys[section->num_keys].value, value,
-           sizeof(float));
+    section->ptr_keys[section->num_keys].value.int_val = int_val;
+  } else if (sscanf((char *)value, "%f", &float_val) == 1 && !is_string) {
     section->ptr_keys[section->num_keys].type = INI_KEY_FLOAT;
-    break;
-  case INI_KEY_STRING:
+    section->ptr_keys[section->num_keys].value.float_val = float_val;
+  } else {
+    section->ptr_keys[section->num_keys].type = INI_KEY_STRING;
     char *copy = (char *)malloc(sizeof(char) * (strlen((char *)value) + 1));
     if (!copy) {
       return 0;
     }
     strcpy(copy, (char *)value);
-    memcpy((void *)&section->ptr_keys[section->num_keys].value, (void *)&copy,
-           sizeof(char *));
-    section->ptr_keys[section->num_keys].type = INI_KEY_STRING;
-    break;
-  default:
-    break;
+    section->ptr_keys[section->num_keys].value.string_val = copy;
   }
+
   section->num_keys++;
   return 1;
 }
@@ -300,6 +299,7 @@ ini_file *ini_load(const char *path) {
   if (read_bytes != file_size) {
     free(buf);
     free(curr_str);
+    free(val_str);
     return NULL;
   }
   buf[file_size] = '\0';
@@ -309,6 +309,7 @@ ini_file *ini_load(const char *path) {
   if (!ptr) {
     free(buf);
     free(curr_str);
+    free(val_str);
     return NULL;
   }
 
@@ -318,6 +319,7 @@ ini_file *ini_load(const char *path) {
   if (!ptr->ptr_sections) {
     free(buf);
     free(curr_str);
+    free(val_str);
     free(ptr);
     return NULL;
   }
@@ -461,7 +463,7 @@ ini_file *ini_load(const char *path) {
             break;
           }
         }
-        __ini_add_key(curr_section, curr_str, INI_KEY_STRING, val_str);
+        __ini_add_key(curr_section, curr_str, INI_KEY_STRING, val_str, quotes);
 
         state = INIPS_NONE;
       } else if (buf[i] == '[' || buf[i] == ']' || buf[i] == '=') {
@@ -492,10 +494,16 @@ ini_file *ini_load(const char *path) {
     ini_free(ptr);
     return NULL;
   } else {
+    size_t s, k;
+    for (s = 0; s < ptr->num_sections; s++) {
+      for (k = 0; k < ptr->ptr_sections[s].num_keys; k++) {
+        printf("%s %d\n", ptr->ptr_sections[s].ptr_keys[k].name,
+               ptr->ptr_sections[s].ptr_keys[k].type);
+      }
+    }
     return ptr;
   }
 }
-
 size_t ini_num_sections(ini_file *ini) { return ini->num_sections; }
 
 int ini_has_section(ini_file *ini, const char *section_name) {
