@@ -5,8 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef INILOAD_NAME_MAXLEN
 #define INILOAD_NAME_MAXLEN 128
+#endif
+
+#ifndef INILOAD_INITIAL_CAP
 #define INILOAD_INITIAL_CAP 8
+#endif
 
 /* Forward declaration */
 typedef struct ini_file ini_file;
@@ -120,10 +125,11 @@ void ini_free(ini_file *ini);
 }
 #endif
 
+#endif /* INILOAD_H */
+
 /******************
  * Implementation *
  ******************/
-#define INILOAD_IMPLEMENTATION
 #ifdef INILOAD_IMPLEMENTATION
 
 #ifdef __cplusplus
@@ -356,6 +362,7 @@ ini_file *ini_load(const char *path) {
 
   for (i = 0; i < file_size + 1 && !bad_syntax && !alloc_error; i++) {
     c = buf[i];
+    /*printf("%c <--- %d\n", c, state);*/
 
     switch (state) {
     case INIPS_NONE:
@@ -413,6 +420,7 @@ ini_file *ini_load(const char *path) {
     case INIPS_AFTER_SECTION_NAME:
       if (IS_NEWLINE_OR_EOF(c)) {
         state = INIPS_NONE;
+      } else if (IS_SPACE(c)) {
       } else {
         bad_syntax = 1;
       }
@@ -423,7 +431,7 @@ ini_file *ini_load(const char *path) {
         state = INIPS_AFTER_KEY_NAME;
       } else if (c == '=') {
         state = INIPS_BEFORE_KEY_VALUE;
-      } else if (c == '[' || c == ']') {
+      } else if (c == '[' || c == ']' || IS_NEWLINE_OR_EOF(c)) {
         bad_syntax = 1;
       } else {
         name_len++;
@@ -621,5 +629,3 @@ void ini_free(ini_file *ini) {
 #endif
 
 #endif /* INILOAD_IMPLEMENTATION */
-
-#endif /* INILOAD_H */
