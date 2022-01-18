@@ -1,0 +1,24 @@
+digraph finite_state_machine {
+	rankdir=LR;
+	size="12";
+	node [shape = rectangle];
+	None -> None [label = "␣, \\t, \\r, \\n, \\0"];
+	None -> "Section name" [label = "["];
+	"Section name" -> "Section name" [label = "*"];
+	"Section name" -> "After section name" [label = "]\nAddSection()"];
+	"After section name" -> None [label = "\\r, \\n"];
+	None -> "Key name" [label = "*"];
+	"Key name" -> "Key name" [label = "*"];
+	"Key name" -> "After key name" [label = "␣, \\t"];
+	"After key name" -> "After key name" [label = "␣, \\t"];
+	"Key name" -> "Before key value" [label = "="];
+	"After key name" -> "Before key value" [label = "="];
+	"Before key value" -> "Before key value" [label = "␣, \\t"];
+	"Before key value" -> "Quoted value" [label = "\""];
+	"Quoted value" -> "Quoted value" [label = "*"];
+	"Quoted value" -> "After key value" [label = "\"\nAddKey()"];
+	"After key value" -> None [label = "\\r, \\n, \\0"];
+	"Before key value" -> "Non-quoted value" [label = "*"];
+	"Non-quoted value" -> "Non-quoted value" [label = "*"];
+	"Non-quoted value" -> None [label = "\\r, \\n, \\0\nAddKey()"];
+}
