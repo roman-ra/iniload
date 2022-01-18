@@ -5,7 +5,7 @@
 Do not forget to `#define INILOAD_IMPLEMENTATION` in one of your source files before including iniload.h:
 
 A minimal example:
-```
+```C
 #define INILOAD_IMPLEMENTATION
 #include "iniload.h"
 
