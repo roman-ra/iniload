@@ -1,8 +1,10 @@
 digraph finite_state_machine {
-	rankdir=LR;
 	size="12";
 	node [shape = rectangle];
 	None -> None [label = "␣, \\t, \\r, \\n, \\0"];
+	None -> Comment [label = ";, #"];
+	Comment -> Comment [label = "*"];
+	Comment -> None [label = "\\r, \\n, \\0"];
 	None -> "Section name" [label = "["];
 	"Section name" -> "Section name" [label = "*"];
 	"Section name" -> "After section name" [label = "]\nAddSection()"];
