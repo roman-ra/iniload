@@ -30,4 +30,4 @@ int main(int argc, char *argv[]) {
 }
 ```
 
-By default, the names of sections and keys cannot be longer than 128. This limit can be increased by `#define INILOAD_NAME_MAXLEN *your value*` before the definition of `INILOAD_IMPLEMENTATION`.
+By default, the names of sections and keys cannot be longer than 128. This limit can be increased by `#define INILOAD_NAME_MAXLEN *your value*` before including iniload.h in the file where you defined `INILOAD_IMPLEMENTATION`.
