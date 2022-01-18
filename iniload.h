@@ -6,16 +6,7 @@
 #include <string.h>
 
 #define INILOAD_NAME_MAXLEN 128
-#define INILOAD_INITIAL_CAP 16
-
-/**
- * @brief Supported INI key types.
- */
-typedef enum ini_key_type {
-  INI_KEY_INT,   /**< Signed integer key */
-  INI_KEY_FLOAT, /**< Single-precision floating point number key */
-  INI_KEY_STRING /**< String key */
-} ini_key_type;
+#define INILOAD_INITIAL_CAP 8
 
 /* Forward declaration */
 typedef struct ini_file ini_file;
@@ -29,7 +20,6 @@ extern "C" {
  * @brief Parses an INI file and returns a pointer to an object containing
  * the parsed data.
  *
- * @endcode
  * @param path Path to the INI file
  * @return Pointer to an ini_file struct containing the parsed data or NULL if
  * there was an error parsing or dynamically allocating the memory.
@@ -141,6 +131,15 @@ extern "C" {
 #endif
 
 /**
+ * @brief Supported INI key types.
+ */
+typedef enum ini_key_type {
+  INI_KEY_INT,   /**< Signed integer key */
+  INI_KEY_FLOAT, /**< Single-precision floating point number key */
+  INI_KEY_STRING /**< String key */
+} ini_key_type;
+
+/**
  * @brief Represents a single INI key (its name, data type and value).
  */
 typedef struct ini_key {
@@ -173,11 +172,12 @@ struct ini_file {
 };
 
 ini_section *__ini_add_section(ini_file *ini, const char *section_name) {
+  ini_key *ptr_keys = NULL;
   if (ini->num_sections == ini->cap_sections) {
     /* Allocate more memory to add a new section */
     ini_section *ptr_sec_new = (ini_section *)realloc(
         ini->ptr_sections, sizeof(ini_section) * (ini->cap_sections * 2));
-    if (!ptr_sec_new) {
+    if (ptr_sec_new == NULL) {
       return NULL;
     }
     ini->ptr_sections = ptr_sec_new;
@@ -187,8 +187,8 @@ ini_section *__ini_add_section(ini_file *ini, const char *section_name) {
   strcpy(ini->ptr_sections[ini->num_sections].name, section_name);
   ini->ptr_sections[ini->num_sections].num_keys = 0;
   ini->ptr_sections[ini->num_sections].cap_keys = INILOAD_INITIAL_CAP;
-  ini_key *ptr_keys = (ini_key *)malloc(sizeof(ini_key) * INILOAD_INITIAL_CAP);
-  if (!ptr_keys) {
+  ptr_keys = (ini_key *)malloc(sizeof(ini_key) * INILOAD_INITIAL_CAP);
+  if (ptr_keys == NULL) {
     return NULL;
   }
   ini->ptr_sections[ini->num_sections].ptr_keys = ptr_keys;
@@ -196,61 +196,100 @@ ini_section *__ini_add_section(ini_file *ini, const char *section_name) {
   return &(ini->ptr_sections[ini->num_sections - 1]);
 }
 
-int __ini_add_key(ini_section *section, const char *key_name, ini_key_type type,
-                  void *value, int is_string) {
-  float float_val;
-  int int_val;
-
+int __ini_add_key(ini_section *section, const char *key_name, const char *value,
+                  size_t value_len, int quotes) {
+  ini_key *ptr_keys_new;
+  double float_val;
+  long int int_val;
+  char *endptr;
+  char *copy = NULL;
   if (section->num_keys == section->cap_keys) {
-    ini_key *new_ptr = (ini_key *)realloc(
+    /* Allocate more memory to add a new key */
+    ptr_keys_new = (ini_key *)realloc(
         section->ptr_keys, sizeof(ini_key) * (section->cap_keys * 2));
-    if (new_ptr) {
+    if (ptr_keys_new == NULL) {
       return 0;
     }
-    section->ptr_keys = new_ptr;
     section->cap_keys = section->cap_keys * 2;
+    section->ptr_keys = ptr_keys_new;
   }
+
   strcpy(section->ptr_keys[section->num_keys].name, key_name);
 
-  /* Guess the data type */
-  if (sscanf((char *)value, "%d", &int_val) == 1 && !is_string &&
-      strchr((char *)value, '.') == NULL) {
-    /* We need to check if there is a dot to avoid parsing only the integer part
-     * of a possible float  */
-    section->ptr_keys[section->num_keys].type = INI_KEY_INT;
-    section->ptr_keys[section->num_keys].value.int_val = int_val;
-  } else if (sscanf((char *)value, "%f", &float_val) == 1 && !is_string) {
-    section->ptr_keys[section->num_keys].type = INI_KEY_FLOAT;
-    section->ptr_keys[section->num_keys].value.float_val = float_val;
-  } else {
-    section->ptr_keys[section->num_keys].type = INI_KEY_STRING;
-    char *copy = (char *)malloc(sizeof(char) * (strlen((char *)value) + 1));
-    if (!copy) {
+  /* Guess the data type of the key */
+  if (quotes) {
+    /* Definitely a string if it is quoted */
+    copy = (char *)malloc(value_len + 1);
+    if (copy == NULL) {
       return 0;
     }
-    strcpy(copy, (char *)value);
+    strcpy(copy, value);
     section->ptr_keys[section->num_keys].value.string_val = copy;
+    section->ptr_keys[section->num_keys].type = INI_KEY_STRING;
+  } else {
+    int_val = strtol(value, &endptr, 0);
+    if (*endptr == '\0') {
+      /* This is an integer */
+      section->ptr_keys[section->num_keys].value.int_val = int_val;
+      section->ptr_keys[section->num_keys].type = INI_KEY_INT;
+    } else {
+      /* Have to use strtod instead of the (yet) unsupported strtof */
+      float_val = strtod(value, &endptr);
+      if (*endptr == '\0') {
+        /* This is a float */
+        section->ptr_keys[section->num_keys].value.float_val = (float)float_val;
+        section->ptr_keys[section->num_keys].type = INI_KEY_FLOAT;
+      } else {
+        /* Must be a string then */
+        copy = (char *)malloc(value_len + 1);
+        if (copy == NULL) {
+          return 0;
+        }
+        strcpy(copy, value);
+        section->ptr_keys[section->num_keys].value.string_val = copy;
+        section->ptr_keys[section->num_keys].type = INI_KEY_STRING;
+      }
+    }
   }
 
   section->num_keys++;
   return 1;
 }
 
-ini_file *ini_load(const char *path) {
-  /* Declarations to comply with ISO C90 */
-  long file_size;
-  char *buf;
-  size_t read_bytes;
-  ini_file *ptr;
+ini_key *__ini_get_key_ptr(ini_file *ini, const char *section_name,
+                           const char *key_name) {
+  size_t s, k;
+  for (s = 0; s < ini->num_sections; s++) {
+    if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
+      for (k = 0; k < ini->ptr_sections[s].num_keys; k++) {
+        if (strcmp(ini->ptr_sections[s].ptr_keys[k].name, key_name) == 0) {
+          return &ini->ptr_sections[s].ptr_keys[k];
+        }
+      }
+    }
+  }
+  return NULL;
+}
 
-  size_t i;
-  char *curr_str;
-  char *val_str;
-  size_t curr_pos = 0;
-  size_t val_pos = 0;
-  ini_section *curr_section = NULL;
-  int bad_syntax = 0;
+ini_file *ini_load(const char *path) {
+  FILE *f = NULL;
+  long file_size = 0;
+  char *buf = 0;
+  size_t name_pos = 0;
+  size_t name_len = 0;
+  size_t value_pos = 0;
+  size_t value_len = 0;
+  ini_file *ptr = NULL;
+
+  size_t i = 0;
+  char c = 0;
+  char tmp = 0;
+  char tmp2 = 0;
+
   int alloc_error = 0;
+  int bad_syntax = 0;
+
+  ini_section *curr_section = NULL;
 
   enum {
     INIPS_NONE,
@@ -260,14 +299,14 @@ ini_file *ini_load(const char *path) {
     INIPS_KEY_NAME,
     INIPS_AFTER_KEY_NAME,
     INIPS_BEFORE_KEY_VALUE,
-    INIPS_KEY_VALUE
+    INIPS_QUOTED_VALUE,
+    INIPS_NON_QUOTED_VALUE,
+    INIPS_AFTER_KEY_VALUE
   } state = INIPS_NONE;
 
-  int quotes = 0;
+  f = fopen(path, "rt");
 
-  FILE *f = fopen(path, "rt");
-
-  if (!f) {
+  if (f == NULL) {
     return NULL;
   }
 
@@ -277,39 +316,23 @@ ini_file *ini_load(const char *path) {
 
   /* Read the entire file */
   buf = (char *)malloc(sizeof(char) * file_size + 1);
-  if (!buf) {
+  if (buf == NULL) {
     fclose(f);
     return NULL;
   }
-  curr_str = (char *)malloc(sizeof(char) * file_size + 1);
-  if (!curr_str) {
+
+  if (fread(buf, 1, file_size, f) != file_size) {
+    fclose(f);
     free(buf);
-    fclose(f);
     return NULL;
   }
-  val_str = (char *)malloc(sizeof(char) * file_size + 1);
-  if (!val_str) {
-    free(buf);
-    free(curr_str);
-    fclose(f);
-    return NULL;
-  }
-  read_bytes = fread(buf, 1, file_size, f);
   fclose(f);
-  if (read_bytes != file_size) {
-    free(buf);
-    free(curr_str);
-    free(val_str);
-    return NULL;
-  }
   buf[file_size] = '\0';
 
   /* Allocate memory for the ini file struct */
   ptr = (ini_file *)malloc(sizeof(ini_file));
-  if (!ptr) {
+  if (ptr == NULL) {
     free(buf);
-    free(curr_str);
-    free(val_str);
     return NULL;
   }
 
@@ -318,78 +341,77 @@ ini_file *ini_load(const char *path) {
       (ini_section *)malloc(sizeof(ini_section) * INILOAD_INITIAL_CAP);
   if (!ptr->ptr_sections) {
     free(buf);
-    free(curr_str);
-    free(val_str);
     free(ptr);
     return NULL;
   }
   ptr->cap_sections = INILOAD_INITIAL_CAP;
   ptr->num_sections = 0;
 
-  /* Parse using a state machine/automaton */
-  for (i = 0; i < file_size + 1 && !bad_syntax && !alloc_error; i++) {
-    switch (state) {
+/* Parse using a state machine/automaton */
+#define IS_SPACE(c) (c == ' ' || c == '\t')
+#define IS_NEWLINE(c) (c == '\r' || c == '\n')
+#define IS_EOF(c) (c == '\0')
+#define IS_NEWLINE_OR_EOF(c) (IS_NEWLINE(c) || IS_EOF(c))
+#define IS_COMMENT(c) (c == ';' || c == '#')
 
+  for (i = 0; i < file_size + 1 && !bad_syntax && !alloc_error; i++) {
+    c = buf[i];
+
+    switch (state) {
     case INIPS_NONE:
-      if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == ' ' || buf[i] == '\t' ||
-          buf[i] == '\0') {
-        /* Skip empty lines or spaces */
-      } else if (buf[i] == ';' || buf[i] == '#') {
-        /* Found a comment */
+      if (IS_SPACE(c) || IS_NEWLINE_OR_EOF(c)) {
+        /* Do nothing */
+      } else if (IS_COMMENT(c)) {
         state = INIPS_COMMENT;
-      } else if (buf[i] == '[') {
-        /* Found a section name */
+      } else if (c == '[') {
+        name_pos = i + 1;
+        name_len = 0;
         state = INIPS_SECTION_NAME;
-        curr_pos = 0;
       } else {
-        /* Found a key name */
+        /* Everything else could be a key name */
+        name_pos = i;
+        name_len = 1;
         state = INIPS_KEY_NAME;
-        curr_pos = 0;
-        curr_str[curr_pos++] = buf[i];
       }
       break;
 
     case INIPS_COMMENT:
-      if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\0') {
-        /* End of the comment */
+      if (IS_NEWLINE_OR_EOF(c)) {
         state = INIPS_NONE;
       } else {
-        /* Read through the comment */
+        /* Do nothing, read the comment */
       }
       break;
 
     case INIPS_SECTION_NAME:
-      if (buf[i] == ']') {
-        /* End of section name */
-        curr_str[curr_pos] = '\0';
-
-        /* Add this section (if its name is not too long) */
-        if (curr_pos > INILOAD_NAME_MAXLEN) {
+      if (c == ']') {
+        /* Add the new section */
+        if (name_len > INILOAD_NAME_MAXLEN) {
+          /* Name is too long */
           bad_syntax = 1;
           break;
         }
-
-        curr_section = __ini_add_section(ptr, curr_str);
+        /* "Cut" the buffer to extract the section name */
+        tmp = buf[name_pos + name_len];
+        buf[name_pos + name_len] = '\0';
+        curr_section = __ini_add_section(ptr, buf + name_pos);
         if (curr_section == NULL) {
           alloc_error = 1;
           break;
         }
-
+        /* Restore the buffer */
+        buf[name_pos + name_len] = tmp;
         state = INIPS_AFTER_SECTION_NAME;
-      } else if (buf[i] == '[' || buf[i] == '=' || buf[i] == ';' ||
-                 buf[i] == '#' || buf[i] == '\n' || buf[i] == '\r' ||
-                 buf[i] == '\0') {
-        /* Bad syntax */
+      } else if (c == '[' || c == '=' || IS_NEWLINE_OR_EOF(c) ||
+                 IS_COMMENT(c)) {
         bad_syntax = 1;
       } else {
-        /* Read the section name */
-        curr_str[curr_pos++] = buf[i];
+        name_len++;
       }
       break;
 
     case INIPS_AFTER_SECTION_NAME:
-      if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\0') {
-        /* We expect a newline or end of file after a section name */
+      if (IS_NEWLINE_OR_EOF(c)) {
         state = INIPS_NONE;
       } else {
         bad_syntax = 1;
@@ -397,110 +419,130 @@ ini_file *ini_load(const char *path) {
       break;
 
     case INIPS_KEY_NAME:
-      if (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '=') {
-        curr_str[curr_pos] = '\0';
+      if (IS_SPACE(c)) {
         state = INIPS_AFTER_KEY_NAME;
-      } else if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\0' ||
-                 buf[i] == '[' || buf[i] == ']') {
-        /* Unexpected newline or end of file in the key name */
+      } else if (c == '=') {
+        state = INIPS_BEFORE_KEY_VALUE;
+      } else if (c == '[' || c == ']') {
         bad_syntax = 1;
       } else {
-        /* Read the key name */
-        curr_str[curr_pos++] = buf[i];
+        name_len++;
+      }
+      if (name_len > INILOAD_NAME_MAXLEN) {
+        bad_syntax = 1;
+        break;
       }
       break;
 
     case INIPS_AFTER_KEY_NAME:
-      if (buf[i] == ' ' || buf[i] == '\t') {
-        /* Skip through the trailing spaces */
-      } else if (buf[i] == '=') {
-        /* Found a (possible) beginning of a key value */
+      if (IS_SPACE(c)) {
+      } else if (c == '=') {
         state = INIPS_BEFORE_KEY_VALUE;
-        val_pos = 0;
-        quotes = 0;
       } else {
-        /* Everything else is bad syntax */
         bad_syntax = 1;
       }
       break;
 
     case INIPS_BEFORE_KEY_VALUE:
-      if (buf[i] == ' ' || buf[i] == '\t') {
-        /* Skip possible spaces before the value */
-      } else if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\0' ||
-                 buf[i] == '[' || buf[i] == ']') {
-        /* This characters cannot be before the value, bad syntax */
+      if (IS_SPACE(c)) {
+      } else if (IS_NEWLINE_OR_EOF(c) || c == '=' || c == '[' || c == ']') {
         bad_syntax = 1;
-      } else if (buf[i] == '\"') {
-        /* Optional quotes tell us that the value is a string */
-        quotes = 1;
-        state = INIPS_KEY_VALUE;
+      } else if (c == '\"') {
+        value_pos = i + 1;
+        value_len = 0;
+        state = INIPS_QUOTED_VALUE;
       } else {
-        /* Found the value already */
-        val_str[val_pos++] = buf[i];
-        state = INIPS_KEY_VALUE;
+        value_pos = i;
+        value_len = 1;
+        state = INIPS_NON_QUOTED_VALUE;
       }
       break;
 
-    case INIPS_KEY_VALUE:
-      if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\0' ||
-          buf[i] == '\"') {
-        if (buf[i] == '\"' && !quotes) {
-          /* Didn't have quotes in the beginning, not expecting them now */
-          bad_syntax = 1;
-          break;
-        }
-
-        /* Otherwise found the end of the value */
-        val_str[val_pos] = '\0';
-
+    case INIPS_QUOTED_VALUE:
+      if (c == '\"') {
+        /* Insert the key */
+        tmp = buf[name_pos + name_len];
+        buf[name_pos + name_len] = '\0';
+        tmp2 = buf[value_pos + value_len];
+        buf[value_pos + value_len] = '\0';
         if (curr_section == NULL) {
-          /* The key is not in any section but we don't have a section with an
-             empty name yet */
+          /* Empty section but we don't have it yet */
           curr_section = __ini_add_section(ptr, "");
           if (curr_section == NULL) {
             alloc_error = 1;
             break;
           }
         }
-        __ini_add_key(curr_section, curr_str, INI_KEY_STRING, val_str, quotes);
 
-        state = INIPS_NONE;
-      } else if (buf[i] == '[' || buf[i] == ']' || buf[i] == '=') {
-        /* These symbols can only be inside a quoted string */
-        if (!quotes) {
-          bad_syntax = 1;
-        } else {
-          val_str[val_pos++] = buf[i];
-        }
+        __ini_add_key(curr_section, buf + name_pos, buf + value_pos, value_len,
+                      1);
+
+        /* Restore the buffer */
+        buf[name_pos + name_len] = tmp;
+        buf[value_pos + value_len] = tmp2;
+        state = INIPS_AFTER_KEY_VALUE;
+      } else if (IS_NEWLINE_OR_EOF(c)) {
+        bad_syntax = 1;
       } else {
-        /* Everything else can be a part of the value */
-        val_str[val_pos++] = buf[i];
+        value_len++;
+      }
+      break;
+
+    case INIPS_NON_QUOTED_VALUE:
+      if (IS_NEWLINE_OR_EOF(c)) {
+        tmp = buf[name_pos + name_len];
+        buf[name_pos + name_len] = '\0';
+        tmp2 = buf[value_pos + value_len];
+        buf[value_pos + value_len] = '\0';
+        if (curr_section == NULL) {
+          /* Empty section but we don't have it yet */
+          curr_section = __ini_add_section(ptr, "");
+          if (curr_section == NULL) {
+            alloc_error = 1;
+            break;
+          }
+        }
+
+        __ini_add_key(curr_section, buf + name_pos, buf + value_pos, value_len,
+                      0);
+
+        /* Restore the buffer */
+        buf[name_pos + name_len] = tmp;
+        buf[value_pos + value_len] = tmp2;
+        state = INIPS_NONE;
+      }
+      if (c == '[' || c == ']' || c == '=') {
+        bad_syntax = 1;
+      } else {
+        value_len++;
+      }
+      break;
+
+    case INIPS_AFTER_KEY_VALUE:
+      if (IS_NEWLINE_OR_EOF(c)) {
+        state = INIPS_NONE;
+      } else {
+        bad_syntax = 1;
       }
       break;
 
     default:
       break;
     }
-
-    /* printf("%c <-- %d\n", buf[i], state); */
   }
 
   free(buf);
-  free(curr_str);
-  free(val_str);
+
+#undef IS_SPACE
+#undef IS_NEWLINE
+#undef IS_EOF
+#undef IS_NEWLINE_OR_EOF
+#undef IS_COMMENT
 
   if (bad_syntax || alloc_error) {
     ini_free(ptr);
     return NULL;
   } else {
-    size_t s, k;
-    for (s = 0; s < ptr->num_sections; s++) {
-      for (k = 0; k < ptr->ptr_sections[s].num_keys; k++) {
-        printf("%s %d\n", ptr->ptr_sections[s].ptr_keys[k].name,
-               ptr->ptr_sections[s].ptr_keys[k].type);
-      }
-    }
     return ptr;
   }
 }
@@ -517,7 +559,7 @@ int ini_has_section(ini_file *ini, const char *section_name) {
 }
 
 size_t ini_num_keys(ini_file *ini, const char *section_name) {
-  size_t s, k;
+  size_t s;
   for (s = 0; s < ini->num_sections; s++) {
     if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
       return ini->ptr_sections[s].num_keys;
@@ -527,68 +569,37 @@ size_t ini_num_keys(ini_file *ini, const char *section_name) {
 }
 
 int ini_has_key(ini_file *ini, const char *section_name, const char *key_name) {
-  size_t s, k;
-  for (s = 0; s < ini->num_sections; s++) {
-    if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
-      for (k = 0; k < ini->ptr_sections[s].num_keys; k++) {
-        if (strcmp(ini->ptr_sections[s].ptr_keys[k].name, key_name) == 0) {
-          return 1;
-        }
-      }
-    }
-  }
-  return 0;
+  return (__ini_get_key_ptr(ini, section_name, key_name) == NULL ? 0 : 1);
 }
 
 int ini_get_int(ini_file *ini, const char *section_name, const char *key_name,
                 int default_val) {
-  size_t s, k;
-  for (s = 0; s < ini->num_sections; s++) {
-    if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
-      for (k = 0; k < ini->ptr_sections[s].num_keys; k++) {
-        if (strcmp(ini->ptr_sections[s].ptr_keys[k].name, key_name) == 0) {
-          return (ini->ptr_sections[s].ptr_keys[k].type == INI_KEY_INT)
-                     ? ini->ptr_sections[s].ptr_keys[k].value.int_val
-                     : default_val;
-        }
-      }
-    }
+  ini_key *ptr = __ini_get_key_ptr(ini, section_name, key_name);
+  if (ptr == NULL || ptr->type != INI_KEY_INT) {
+    return default_val;
+  } else {
+    return ptr->value.int_val;
   }
-  return default_val;
 }
 
 float ini_get_float(ini_file *ini, const char *section_name,
                     const char *key_name, float default_val) {
-  size_t s, k;
-  for (s = 0; s < ini->num_sections; s++) {
-    if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
-      for (k = 0; k < ini->ptr_sections[s].num_keys; k++) {
-        if (strcmp(ini->ptr_sections[s].ptr_keys[k].name, key_name) == 0) {
-          return (ini->ptr_sections[s].ptr_keys[k].type == INI_KEY_FLOAT)
-                     ? ini->ptr_sections[s].ptr_keys[k].value.float_val
-                     : default_val;
-        }
-      }
-    }
+  ini_key *ptr = __ini_get_key_ptr(ini, section_name, key_name);
+  if (ptr == NULL || ptr->type != INI_KEY_FLOAT) {
+    return default_val;
+  } else {
+    return ptr->value.float_val;
   }
-  return default_val;
 }
 
 char *ini_get_string(ini_file *ini, const char *section_name,
                      const char *key_name, char *default_val) {
-  size_t s, k;
-  for (s = 0; s < ini->num_sections; s++) {
-    if (strcmp(ini->ptr_sections[s].name, section_name) == 0) {
-      for (k = 0; k < ini->ptr_sections[s].num_keys; k++) {
-        if (strcmp(ini->ptr_sections[s].ptr_keys[k].name, key_name) == 0) {
-          return (ini->ptr_sections[s].ptr_keys[k].type == INI_KEY_STRING)
-                     ? ini->ptr_sections[s].ptr_keys[k].value.string_val
-                     : default_val;
-        }
-      }
-    }
+  ini_key *ptr = __ini_get_key_ptr(ini, section_name, key_name);
+  if (ptr == NULL || ptr->type != INI_KEY_STRING) {
+    return default_val;
+  } else {
+    return ptr->value.string_val;
   }
-  return default_val;
 }
 
 void ini_free(ini_file *ini) {
